@@ -124,3 +124,40 @@ pub fn import(root: &Json) -> Result<(Board, ImportStats), String> {
 
     Ok((Board { name: board_name, lists }, stats))
 }
+
+/// Builds a Trello-shaped export from a Board, for the reverse direction.
+/// The ids are synthesized (Trello's own ids aren't recoverable from
+/// markdown) but they're consistent within the file, so idList still
+/// links each card to the right list.
+pub fn export(board: &Board) -> Json {
+    let mut lists_json = Vec::new();
+    let mut cards_json = Vec::new();
+
+    for (list_index, list) in board.lists.iter().enumerate() {
+        let list_id = format!("list-{}", list_index + 1);
+        lists_json.push(Json::Object(vec![
+            ("id".to_string(), Json::String(list_id.clone())),
+            ("name".to_string(), Json::String(list.name.clone())),
+            ("closed".to_string(), Json::Bool(false)),
+            ("pos".to_string(), Json::Number((list_index + 1) as f64 * 1000.0)),
+        ]));
+
+        for (card_index, card) in list.cards.iter().enumerate() {
+            let card_id = format!("card-{}-{}", list_index + 1, card_index + 1);
+            cards_json.push(Json::Object(vec![
+                ("id".to_string(), Json::String(card_id)),
+                ("name".to_string(), Json::String(card.name.clone())),
+                ("desc".to_string(), Json::String(card.desc.clone())),
+                ("idList".to_string(), Json::String(list_id.clone())),
+                ("closed".to_string(), Json::Bool(false)),
+                ("pos".to_string(), Json::Number((card_index + 1) as f64 * 1000.0)),
+            ]));
+        }
+    }
+
+    Json::Object(vec![
+        ("name".to_string(), Json::String(board.name.clone())),
+        ("lists".to_string(), Json::Array(lists_json)),
+        ("cards".to_string(), Json::Array(cards_json)),
+    ])
+}

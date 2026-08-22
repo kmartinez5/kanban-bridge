@@ -74,6 +74,60 @@ pub fn parse(input: &str) -> Result<Json, ParseError> {
     Ok(value)
 }
 
+/// Serializes a Json value back to text, for the reverse conversion
+/// (writing a Trello-shaped export from a parsed Obsidian board).
+pub fn stringify(value: &Json) -> String {
+    let mut out = String::new();
+    write_value(value, &mut out);
+    out
+}
+
+fn write_value(value: &Json, out: &mut String) {
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Number(n) => out.push_str(&format_number(*n)),
+        Json::String(s) => {
+            out.push('"');
+            out.push_str(&escape(s));
+            out.push('"');
+        }
+        Json::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_value(item, out);
+            }
+            out.push(']');
+        }
+        Json::Object(pairs) => {
+            out.push('{');
+            for (i, (key, val)) in pairs.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push('"');
+                out.push_str(&escape(key));
+                out.push_str("\":");
+                write_value(val, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+// Trello's own export uses plain integers for ids/positions, so drop the
+// trailing ".0" whenever a value has no fractional part.
+fn format_number(n: f64) -> String {
+    if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    }
+}
+
 /// Escapes a string for embedding in JSON output we write ourselves
 /// (the CLI's --json report), not for the parser above.
 pub fn escape(s: &str) -> String {

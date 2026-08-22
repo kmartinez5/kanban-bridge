@@ -10,14 +10,17 @@ struct Args {
     input: String,
     output: String,
     json_output: bool,
+    reverse: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut positional = Vec::new();
     let mut json_output = false;
+    let mut reverse = false;
     for arg in env::args().skip(1) {
         match arg.as_str() {
             "--json" => json_output = true,
+            "--reverse" => reverse = true,
             "--help" | "-h" => {
                 print_usage();
                 process::exit(0);
@@ -26,18 +29,20 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     if positional.len() != 2 {
-        return Err("expected exactly two positional arguments: <input.json> <output.md>".to_string());
+        return Err("expected exactly two positional arguments: <input> <output>".to_string());
     }
-    Ok(Args { input: positional.remove(0), output: positional.remove(0), json_output })
+    Ok(Args { input: positional.remove(0), output: positional.remove(0), json_output, reverse })
 }
 
 fn print_usage() {
-    eprintln!("kanban-bridge - convert a Trello JSON board export to an Obsidian Kanban markdown file");
+    eprintln!("kanban-bridge - convert between Trello JSON board exports and Obsidian Kanban markdown");
     eprintln!();
     eprintln!("usage:");
-    eprintln!("  kanban-bridge <input.json> <output.md> [--json]");
+    eprintln!("  kanban-bridge <input.json> <output.md> [--json]      trello -> obsidian");
+    eprintln!("  kanban-bridge <input.md> <output.json> --reverse     obsidian -> trello");
     eprintln!();
-    eprintln!("  --json   print the conversion summary as a JSON object instead of plain text");
+    eprintln!("  --json      print the conversion summary as a JSON object instead of plain text");
+    eprintln!("  --reverse   convert an Obsidian Kanban file back into a Trello export");
 }
 
 fn main() {
@@ -57,6 +62,11 @@ fn main() {
             process::exit(1);
         }
     };
+
+    if args.reverse {
+        run_reverse(&args, &raw);
+        return;
+    }
 
     let parsed = match json::parse(&raw) {
         Ok(value) => value,
@@ -88,6 +98,41 @@ fn main() {
         print_json_report(&args, list_count, card_count, &stats);
     } else {
         print_text_report(&args, list_count, card_count, &stats);
+    }
+}
+
+fn run_reverse(args: &Args, markdown: &str) {
+    let board = match obsidian::parse(markdown) {
+        Ok(board) => board,
+        Err(msg) => {
+            eprintln!("error: {} does not look like an Obsidian Kanban file: {}", args.input, msg);
+            process::exit(1);
+        }
+    };
+
+    let list_count = board.lists.len();
+    let card_count: usize = board.lists.iter().map(|l| l.cards.len()).sum();
+
+    let exported = trello::export(&board);
+    let json_text = json::stringify(&exported);
+
+    if let Err(e) = fs::write(&args.output, json_text) {
+        eprintln!("error: could not write {}: {}", args.output, e);
+        process::exit(1);
+    }
+
+    if args.json_output {
+        println!(
+            "{{\"input\":\"{}\",\"output\":\"{}\",\"lists_converted\":{},\"cards_converted\":{}}}",
+            json::escape(&args.input),
+            json::escape(&args.output),
+            list_count,
+            card_count
+        );
+    } else {
+        println!("converted {} -> {}", args.input, args.output);
+        println!("  lists converted: {}", list_count);
+        println!("  cards converted: {}", card_count);
     }
 }
 

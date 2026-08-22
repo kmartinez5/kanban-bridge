@@ -11,10 +11,15 @@ JSON by hand.
 it writes an Obsidian Kanban markdown file with the same lists, the same card
 order, and the same descriptions, skipping anything Trello has archived.
 
+Point it the other way and it does the reverse: read a Kanban markdown
+file and write a Trello-shaped JSON export back out, using the same list
+and card names.
+
 ## usage
 
 ```
 kanban-bridge <input.json> <output.md> [--json]
+kanban-bridge <input.md> <output.json> --reverse [--json]
 ```
 
 Convert a Trello export to a markdown board:
@@ -56,12 +61,17 @@ kanban-plugin: board
 Drop that file straight into an Obsidian vault and the Kanban plugin renders
 it.
 
+Running `--reverse` on that same file rebuilds a minimal Trello export:
+the list and card names come back, but the ids are freshly generated since
+Trello's own ids aren't recoverable from markdown, so re-importing the
+result into an existing Trello board creates a new one rather than
+updating the original.
+
 ## what it does not do yet
 
-- Only Trello -> Obsidian is implemented right now; the reverse direction is
-  on the list.
-- Attachments, labels, checklists, and comments are dropped. Only list name,
-  card name, and card description survive the conversion.
+- Attachments, labels, checklists, and comments are dropped in both
+  directions. Only list name, card name, and card description survive a
+  conversion so far.
 - The JSON parser is hand-written (no serde, no third-party crates at all) so
   it covers what Trello's export actually contains, not every edge case in
   the JSON spec - escaped surrogate pairs, for instance, are not reassembled.
