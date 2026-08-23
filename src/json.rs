@@ -279,14 +279,29 @@ impl<'a> Parser<'a> {
                         Some(b't') => { out.push('\t'); self.pos += 1; }
                         Some(b'u') => {
                             self.pos += 1;
-                            let code = self.parse_hex4()?;
-                            // Surrogate pairs are not reassembled here, so
-                            // characters outside the basic multilingual
-                            // plane come through wrong. Board/card names
-                            // don't hit that in practice.
-                            if let Some(c) = char::from_u32(code as u32) {
-                                out.push(c);
-                            }
+                            let high = self.parse_hex4()?;
+                            let scalar = if (0xD800..=0xDBFF).contains(&high) {
+                                // high surrogate: needs a following \uXXXX low
+                                // surrogate to form a codepoint outside the
+                                // basic multilingual plane (emoji in card
+                                // names and descriptions land here).
+                                let pair_start = self.pos;
+                                if self.peek() == Some(b'\\') && self.bytes.get(self.pos + 1) == Some(&b'u') {
+                                    self.pos += 2;
+                                    let low = self.parse_hex4()?;
+                                    if (0xDC00..=0xDFFF).contains(&low) {
+                                        Some(0x10000u32 + ((high as u32 - 0xD800) << 10) + (low as u32 - 0xDC00))
+                                    } else {
+                                        self.pos = pair_start;
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                Some(high as u32)
+                            };
+                            out.push(scalar.and_then(char::from_u32).unwrap_or(char::REPLACEMENT_CHARACTER));
                         }
                         _ => return Err(self.err("invalid escape sequence")),
                     }

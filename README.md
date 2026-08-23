@@ -74,7 +74,7 @@ updating the original.
   conversion so far.
 - The JSON parser is hand-written (no serde, no third-party crates at all) so
   it covers what Trello's export actually contains, not every edge case in
-  the JSON spec - escaped surrogate pairs, for instance, are not reassembled.
+  the JSON spec.
 
 ## building
 
