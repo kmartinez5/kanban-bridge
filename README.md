@@ -69,9 +69,13 @@ updating the original.
 
 ## what it does not do yet
 
-- Attachments, labels, checklists, and comments are dropped in both
-  directions. Only list name, card name, and card description survive a
-  conversion so far.
+- Attachments, checklists, and comments are dropped in both directions.
+  List name, card name, card description, and labels survive a conversion
+  so far. Labels are kept in a hidden `%%labels:...%%` line under the card
+  (Obsidian's own comment syntax, so the Kanban plugin doesn't render it) -
+  it round-trips the label's name and Trello color, not a native Kanban
+  tag, since Trello label names can contain spaces and other characters
+  tags can't.
 - The JSON parser is hand-written (no serde, no third-party crates at all) so
   it covers what Trello's export actually contains, not every edge case in
   the JSON spec.

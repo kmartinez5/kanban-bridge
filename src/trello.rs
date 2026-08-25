@@ -3,6 +3,7 @@
 //! by an id that no longer resolves.
 
 use crate::json::Json;
+use std::collections::HashMap;
 
 pub struct Board {
     pub name: String,
@@ -17,6 +18,13 @@ pub struct List {
 pub struct Card {
     pub name: String,
     pub desc: String,
+    pub labels: Vec<Label>,
+}
+
+#[derive(Clone)]
+pub struct Label {
+    pub name: String,
+    pub color: String,
 }
 
 #[derive(Default)]
@@ -67,6 +75,19 @@ pub fn import(root: &Json) -> Result<(Board, ImportStats), String> {
     }
     open_lists.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap_or(std::cmp::Ordering::Equal));
 
+    // Board-level label definitions, keyed by id, so each card's idLabels
+    // can be resolved to a name and color.
+    let mut label_map: HashMap<&str, Label> = HashMap::new();
+    if let Some(labels_json) = root.get("labels").and_then(Json::as_array) {
+        for item in labels_json {
+            if let Some(id) = item.get("id").and_then(Json::as_str) {
+                let name = item.get("name").and_then(Json::as_str).unwrap_or("").to_string();
+                let color = item.get("color").and_then(Json::as_str).unwrap_or("").to_string();
+                label_map.insert(id, Label { name, color });
+            }
+        }
+    }
+
     let cards_json = root
         .get("cards")
         .and_then(Json::as_array)
@@ -107,7 +128,17 @@ pub fn import(root: &Json) -> Result<(Board, ImportStats), String> {
         };
         let desc = item.get("desc").and_then(Json::as_str).unwrap_or("").to_string();
         let pos = item.get("pos").and_then(Json::as_f64).unwrap_or(0.0);
-        grouped[list_index].push((pos, Card { name, desc }));
+        let labels = item
+            .get("idLabels")
+            .and_then(Json::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Json::as_str)
+                    .filter_map(|id| label_map.get(id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        grouped[list_index].push((pos, Card { name, desc, labels }));
     }
 
     let lists: Vec<List> = open_lists
@@ -132,6 +163,29 @@ pub fn import(root: &Json) -> Result<(Board, ImportStats), String> {
 pub fn export(board: &Board) -> Json {
     let mut lists_json = Vec::new();
     let mut cards_json = Vec::new();
+    let mut labels_json = Vec::new();
+
+    // Trello keeps labels as board-level definitions referenced by id, so
+    // collect the distinct (name, color) pairs used across every card and
+    // synthesize an id for each, in first-seen order.
+    let mut label_ids: HashMap<(String, String), String> = HashMap::new();
+    for list in &board.lists {
+        for card in &list.cards {
+            for label in &card.labels {
+                let key = (label.name.clone(), label.color.clone());
+                if label_ids.contains_key(&key) {
+                    continue;
+                }
+                let id = format!("label-{}", label_ids.len() + 1);
+                labels_json.push(Json::Object(vec![
+                    ("id".to_string(), Json::String(id.clone())),
+                    ("name".to_string(), Json::String(label.name.clone())),
+                    ("color".to_string(), Json::String(label.color.clone())),
+                ]));
+                label_ids.insert(key, id);
+            }
+        }
+    }
 
     for (list_index, list) in board.lists.iter().enumerate() {
         let list_id = format!("list-{}", list_index + 1);
@@ -144,11 +198,20 @@ pub fn export(board: &Board) -> Json {
 
         for (card_index, card) in list.cards.iter().enumerate() {
             let card_id = format!("card-{}-{}", list_index + 1, card_index + 1);
+            let id_labels: Vec<Json> = card
+                .labels
+                .iter()
+                .map(|label| {
+                    let key = (label.name.clone(), label.color.clone());
+                    Json::String(label_ids[&key].clone())
+                })
+                .collect();
             cards_json.push(Json::Object(vec![
                 ("id".to_string(), Json::String(card_id)),
                 ("name".to_string(), Json::String(card.name.clone())),
                 ("desc".to_string(), Json::String(card.desc.clone())),
                 ("idList".to_string(), Json::String(list_id.clone())),
+                ("idLabels".to_string(), Json::Array(id_labels)),
                 ("closed".to_string(), Json::Bool(false)),
                 ("pos".to_string(), Json::Number((card_index + 1) as f64 * 1000.0)),
             ]));
@@ -157,6 +220,7 @@ pub fn export(board: &Board) -> Json {
 
     Json::Object(vec![
         ("name".to_string(), Json::String(board.name.clone())),
+        ("labels".to_string(), Json::Array(labels_json)),
         ("lists".to_string(), Json::Array(lists_json)),
         ("cards".to_string(), Json::Array(cards_json)),
     ])

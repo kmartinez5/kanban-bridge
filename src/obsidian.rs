@@ -2,7 +2,8 @@
 //! community plugin expects: a frontmatter marker, then one "## list name"
 //! heading per list with "- [ ] card name" items underneath.
 
-use crate::trello::{Board, Card, List};
+use crate::json::{self, Json};
+use crate::trello::{Board, Card, Label, List};
 
 pub fn write(board: &Board) -> String {
     let mut out = String::new();
@@ -19,6 +20,11 @@ pub fn write(board: &Board) -> String {
             out.push_str("- [ ] ");
             out.push_str(&single_line(&card.name));
             out.push('\n');
+            if !card.labels.is_empty() {
+                out.push_str("  %%labels:");
+                out.push_str(&json::stringify(&labels_to_json(&card.labels)));
+                out.push_str("%%\n");
+            }
             if !card.desc.trim().is_empty() {
                 for line in card.desc.lines() {
                     out.push_str("  ");
@@ -39,7 +45,9 @@ fn single_line(text: &str) -> String {
 
 /// Reads a markdown file written by `write` (or hand-edited in the same
 /// shape) back into a Board. Only the fields `write` produces round-trip:
-/// board name, list names, card names, and card descriptions.
+/// board name, list names, card names, card descriptions, and labels (kept
+/// in a hidden `%%labels:...%%` line so they don't show up in the rendered
+/// board).
 pub fn parse(markdown: &str) -> Result<Board, String> {
     let mut board_name = "Untitled Board".to_string();
     let mut lists: Vec<List> = Vec::new();
@@ -62,7 +70,20 @@ pub fn parse(markdown: &str) -> Result<Board, String> {
             let list = lists
                 .last_mut()
                 .ok_or_else(|| "found a card before any list heading".to_string())?;
-            list.cards.push(Card { name: rest.to_string(), desc: String::new() });
+            list.cards.push(Card { name: rest.to_string(), desc: String::new(), labels: Vec::new() });
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("  %%labels:").and_then(|r| r.strip_suffix("%%")) {
+            let list = lists
+                .last_mut()
+                .ok_or_else(|| "found a labels line before any list heading".to_string())?;
+            let card = list
+                .cards
+                .last_mut()
+                .ok_or_else(|| "found a labels line before any card".to_string())?;
+            let parsed = json::parse(rest)
+                .map_err(|e| format!("invalid %%labels%% metadata: {}", e))?;
+            card.labels = json_to_labels(&parsed);
             continue;
         }
         if let Some(rest) = line.strip_prefix("  ") {
@@ -83,4 +104,30 @@ pub fn parse(markdown: &str) -> Result<Board, String> {
     }
 
     Ok(Board { name: board_name, lists })
+}
+
+fn labels_to_json(labels: &[Label]) -> Json {
+    Json::Array(
+        labels
+            .iter()
+            .map(|label| {
+                Json::Object(vec![
+                    ("name".to_string(), Json::String(label.name.clone())),
+                    ("color".to_string(), Json::String(label.color.clone())),
+                ])
+            })
+            .collect(),
+    )
+}
+
+fn json_to_labels(value: &Json) -> Vec<Label> {
+    value
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .map(|item| Label {
+            name: item.get("name").and_then(Json::as_str).unwrap_or("").to_string(),
+            color: item.get("color").and_then(Json::as_str).unwrap_or("").to_string(),
+        })
+        .collect()
 }
